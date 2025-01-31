@@ -3,7 +3,6 @@ import streamlit as st
 import requests
 import io
 import base64
-from dotenv import load_dotenv
 
 # load_dotenv()
 # api_key = os.getenv('AZURE_SPEECH_KEY')
