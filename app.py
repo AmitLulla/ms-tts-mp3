@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import requests
 from typing import List, Dict
@@ -37,9 +38,47 @@ def fetch_voices() -> List[Dict]:
     except Exception as e:
         st.error(f"Error fetching voices: {str(e)}")
         return []
+    
+def clean_text(text: str) -> str:
+    """
+    Clean text by removing or replacing special characters.
+    
+    Args:
+        text (str): Input text to clean
+        
+    Returns:
+        str: Cleaned text
+    """
+    # Dictionary of replacements (add more as needed)
+    replacements = {
+        '&': 'and',
+        '+': 'plus',
+        '@': 'at',
+        '#': 'number',
+        '%': 'percent',
+        '=': 'equals',
+        '<': 'less than',
+        '>': 'greater than'
+    }
+    
+    # First replace known special characters with their word equivalents
+    for char, replacement in replacements.items():
+        text = text.replace(char, f' {replacement} ')
+    
+    # Remove any remaining special characters but keep basic punctuation
+    text = re.sub(r'[^\w\s.,!?-]', '', text)
+    
+    # Remove extra whitespace
+    text = ' '.join(text.split())
+    
+    return text
 
 def text_to_speech(text: str, voice_name: str) -> bytes:
     """Convert text to speech using selected voice"""
+
+    # Clean the text before converting to speech
+    cleaned_text = clean_text(text)
+
     url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
     
     headers = {
@@ -48,10 +87,10 @@ def text_to_speech(text: str, voice_name: str) -> bytes:
         'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
         'User-Agent': 'streamlit'
     }
-    
+    print(voice_name)
     ssml = f"""<speak version='1.0' xml:lang='en-US'>
         <voice name='{voice_name}'>
-            {text}
+            {cleaned_text}
         </voice>
     </speak>"""
     
@@ -73,7 +112,7 @@ def main():
         return
     
     st.title("Text to Speech Converter")
-    
+    st.info("Some Audio Modals may not be supported")
     # Fetch available voices
     voices = fetch_voices()
     
@@ -101,7 +140,7 @@ def main():
     # Text input
     text_input = st.text_area(
         "Enter text to convert to speech",
-        "Enter your text here..."
+        placeholder="Enter your text here..."
     )
     
     # Convert button
