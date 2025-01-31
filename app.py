@@ -1,8 +1,5 @@
-import os
 import streamlit as st
 import requests
-import io
-import base64
 from typing import List, Dict
 
 AZURE_SPEECH_KEY = st.secrets["AZURE_SPEECH_KEY"]
