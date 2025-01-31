@@ -6,6 +6,7 @@ AZURE_SPEECH_KEY = st.secrets["AZURE_SPEECH_KEY"]
 AZURE_REGION = st.secrets["AZURE_REGION"]
 DEFAULT_VOICE = "en-US-AvaMultilingualNeural"
 
+st.set_page_config(layout="wide", page_icon="https://apper.io/images/fav/apple-icon-180x180.png", page_title="Apper Audio Generation Modal")
 @st.cache_data(ttl=3600)  # Cache the voice list for 1 hour
 def fetch_voices() -> List[Dict]:
     """Fetch available voices from Azure API"""
