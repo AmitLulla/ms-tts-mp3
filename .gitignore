@@ -1,0 +1,11 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+.env.local
