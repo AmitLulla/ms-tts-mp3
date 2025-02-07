@@ -1,239 +1,122 @@
-import re
+import os
 import streamlit as st
-import requests
-from typing import List, Dict
+from dotenv import load_dotenv
+from elevenlabs.client import ElevenLabs
+from elevenlabs import play
 
-AZURE_SPEECH_KEY = st.secrets["AZURE_SPEECH_KEY"]
-AZURE_REGION = st.secrets["AZURE_REGION"]
-DEFAULT_VOICE = "en-US-AvaMultilingualNeural"
+# Load environment variables
+load_dotenv()
 
+# Initialize the ElevenLabs client
+client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+
+# Set up Streamlit app
 st.set_page_config(layout="wide", page_icon="https://apper.io/images/fav/apple-icon-180x180.png", page_title="Apper Audio Generation Modal")
-@st.cache_data(ttl=3600)  # Cache the voice list for 1 hour
-def fetch_voices() -> List[Dict]:
-    """Fetch available voices from Azure API"""
-    url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/voices/list"
-    headers = {
-        'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY
-    }
-    
+
+
+@st.cache_data(ttl=3600)
+def fetch_voices():
+    """Fetch and format available voices from ElevenLabs API"""
     try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            voices = response.json()
-            # Filter and sort voices
-            english_voices = [
-                {
-                    'display_name': v['DisplayName'],
-                    'short_name': v['ShortName'],
-                    'gender': v['Gender'],
-                    'locale': v['Locale']
-                }
-                for v in voices
-                if v['Locale'].startswith('en-')  # Filter for English voices
-            ]
-            return sorted(english_voices, key=lambda x: x['display_name'])
-        else:
-            st.error(f"Failed to fetch voices: {response.status_code}")
-            return []
+        response = client.voices.get_all()
+        return [
+            {
+                "name": voice.name,
+                "id": voice.voice_id,
+                "category": voice.category,
+                "description": voice.description or "No description"
+            }
+            for voice in response.voices
+        ]
     except Exception as e:
         st.error(f"Error fetching voices: {str(e)}")
         return []
-    
-def clean_text(text: str) -> str:
-    """
-    Clean text by removing or replacing special characters.
-    
-    Args:
-        text (str): Input text to clean
-        
-    Returns:
-        str: Cleaned text
-    """
-    # Dictionary of replacements (add more as needed)
-    replacements = {
-        '&': 'and',
-        '+': 'plus',
-        '@': 'at',
-        '#': 'number',
-        '%': 'percent',
-        '=': 'equals',
-        '<': 'less than',
-        '>': 'greater than'
-    }
-    
-    # First replace known special characters with their word equivalents
-    for char, replacement in replacements.items():
-        text = text.replace(char, f' {replacement} ')
-    
-    # Remove any remaining special characters but keep basic punctuation
-    text = re.sub(r'[^\w\s.,!?-]', '', text)
-    
-    # Remove extra whitespace
-    text = ' '.join(text.split())
-    
-    return text
 
-def text_to_speech(text: str, voice_name: str) -> bytes:
-    """Convert text to speech using selected voice"""
-
-    # Clean the text before converting to speech
-    cleaned_text = clean_text(text)
-
-    url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
-    
-    headers = {
-        'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
-        'Content-Type': 'application/ssml+xml',
-        'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
-        'User-Agent': 'streamlit'
-    }
-    print(voice_name)
-    ssml = f"""<speak version='1.0' xml:lang='en-US'>
-        <voice name='{voice_name}'>
-            {cleaned_text}
-        </voice>
-    </speak>"""
-    
+def text_to_speech(text: str, voice_id: str) -> bytes:
+    """Convert text to speech using ElevenLabs API"""
     try:
-        response = requests.post(url, headers=headers, data=ssml.encode('utf-8'))
-        if response.status_code == 200:
-            return response.content
-        else:
-            st.error(f"Error: {response.status_code} - {response.text}")
-            return None
+        audio = client.text_to_speech.convert(
+            text=text,
+            voice_id=voice_id,
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128"
+        )
+        # Convert the generator to bytes
+        return b''.join(audio)
     except Exception as e:
-        st.error(f"Error making API request: {str(e)}")
+        st.error(f"Error generating audio: {str(e)}")
         return None
 
+
 def main():
-    # Azure credentials check
-    if not all(k in st.secrets for k in ["AZURE_SPEECH_KEY", "AZURE_REGION"]):
-        st.error("Azure credentials not found in secrets. Please add them to continue.")
-        return
-    
-    st.title("Text to Speech Converter")
-    st.info("Some Audio Modals may not be supported")
-    # Fetch available voices
+    st.title("ElevenLabs Text-to-Speech Converter")
+    st.info("Generate high-quality audio using ElevenLabs AI voices.")
+
     voices = fetch_voices()
     
-    # Create voice selection dropdown
-    if voices:
-        # Create a dictionary mapping display names to short names
-        voice_options = {f"{v['display_name']} ({v['gender']})": v['short_name'] for v in voices}
-        
-        # Find the default voice in the options
-        default_idx = list(voice_options.values()).index(DEFAULT_VOICE) if DEFAULT_VOICE in voice_options.values() else 0
-        
-        # Create the selectbox with display names
-        selected_display_name = st.selectbox(
-            "Select Voice",
-            options=list(voice_options.keys()),
-            index=default_idx
-        )
-        
-        # Get the corresponding short name
-        selected_voice = voice_options[selected_display_name]
-    else:
-        selected_voice = DEFAULT_VOICE
-        st.warning("Could not fetch voices. Using default voice.")
+    if not voices:
+        st.error("Failed to load voices. Check your API key and network connection.")
+        return
+
+    # Create voice selection dropdown with additional info
+    voice_display = [
+        f"{v['name']} ({v['category']}) - {v['description']}"
+        for v in voices
+    ]
     
-    # Text input
-    text_input = st.text_area(
-        "Enter text to convert to speech",
-        placeholder="Enter your text here..."
+    selected_voice = st.selectbox(
+        "Select Voice",
+        options=voice_display,
+        index=0
     )
     
-    # Convert button
-    if st.button("Convert to Speech"):
-        if text_input and text_input != "Enter your text here...":
-            with st.spinner("Converting text to speech..."):
-                audio_data = text_to_speech(text_input, selected_voice)
+    # Get the corresponding voice ID
+    selected_voice_id = voices[voice_display.index(selected_voice)]["id"]
+
+    # Text input with character limit
+    text_input = st.text_area(
+        "Enter text to convert to speech (max 5000 characters)",
+        placeholder="Type or paste your text here...",
+        height=200,
+        max_chars=5000
+    )
+
+    if st.button("Generate Audio"):
+        if text_input.strip():
+            with st.spinner("Generating audio..."):
+                audio_data = text_to_speech(text_input, selected_voice_id)
                 if audio_data:
                     st.success("Audio generated successfully!")
-                    # Display audio player
-                    st.audio(audio_data, format='audio/mp3')
-                    # Download the audio
+                    st.audio(audio_data, format="audio/mp3")
                     st.download_button(
                         label="Download MP3",
                         data=audio_data,
-                        file_name="generated_audio.mp3",
-                        mime="audio/mp3"
+                        file_name="elevenlabs_audio.mp3",
+                        mime="audio/mp3",
                     )
         else:
-            st.warning("Please enter some text to convert")
+            st.warning("Please enter some text to convert.")
 
 if __name__ == "__main__":
     main()
 # import os
-# import streamlit as st
-# import requests
-# import io
-# import base64
+# from dotenv import load_dotenv
+# from elevenlabs.client import ElevenLabs
+# from elevenlabs import play, save
 
-# # load_dotenv()
-# # api_key = os.getenv('AZURE_SPEECH_KEY')
-# AZURE_SPEECH_KEY=st.secrets["AZURE_SPEECH_KEY"]
-# AZURE_REGION=st.secrets["AZURE_REGION"]
-# MODAL_NAME=st.secrets["MODAL_NAME"]
+# load_dotenv()
 
-# def text_to_speech(text):
-#     url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
-    
-#     headers = {
-#         'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
-#         'Content-Type': 'application/ssml+xml',
-#         'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
-#         'User-Agent': 'streamlit'
-#     }
-    
-#     # Create SSML string
-#     ssml = f"""<speak version='1.0' xml:lang='en-US'>
-#         <voice xml:lang='en-US' xml:gender='Female' name='{MODAL_NAME}'>
-#             {text}
-#         </voice>
-#     </speak>"""
-    
-#     try:
-#         response = requests.post(url, headers=headers, data=ssml.encode('utf-8'))
-#         if response.status_code == 200:
-#             return response.content
-#         else:
-#             st.error(f"Error: {response.status_code} - {response.text}")
-#             return None
-#     except Exception as e:
-#         st.error(f"Error making API request: {str(e)}")
-#         return None
+# # Load the API key from the .env file
+# api_key = os.getenv("ELEVENLABS_API_KEY")
 
-# def main():
-#      # Azure credentials check
-#     if not all(k in st.secrets for k in ["AZURE_SPEECH_KEY", "AZURE_REGION", "MODAL_NAME"]):
-#         st.error("Azure credentials not found in secrets. Please add them to continue.")
-#         return
-    
-#     st.title("Text to Speech Converter")
-#     # Text input
-#     text_input = st.text_area("Enter text to convert to speech", 
-#                              "Enter your text here...")
-    
-#     # Convert button
-#     if st.button("Convert to Speech"):
-        
-#         if text_input and text_input != "Enter your text here...":
-#             with st.spinner("Converting text to speech..."):
-#                 audio_data = text_to_speech(text_input)
-#                 if audio_data:
-#                     st.success("Audio generated successfully!")
-#                     # Display audio player
-#                     st.audio(audio_data, format='audio/mp3')
-#                     # Download the audio
-#                     st.download_button(
-#                         label="Download MP3",
-#                         data=audio_data,
-#                         file_name="generated_audio.mp3",
-#                         mime="audio/mp3"
-#                     )
-#         else:
-#             st.warning("Please enter some text to convert")
+# # Initialize the ElevenLabs client with the API key
+# client = ElevenLabs(api_key=api_key)
 
-# if __name__ == "__main__":
-#     main()
+# audio = client.text_to_speech.convert(
+#     text="In a quiet village where the sky brushes the fields in hues of gold, young Mia discovered a map leading to forgotten treasures. Little did she know, her cat Whiskers had a secret: he was the guardian of the map, tasked with guiding Mia to not only the treasure but also to her destiny.",
+#     voice_id="KWlsl9PZDXTXVygIiX8y",
+#     model_id="eleven_multilingual_v2",
+#     output_format="mp3_44100_128",
+# )
+
+# save(audio, "custom.mp3")
