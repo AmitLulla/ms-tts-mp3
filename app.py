@@ -1,11 +1,7 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
-from elevenlabs import play
 
-# Load environment variables
-load_dotenv()
 
 # Initialize the ElevenLabs client
 client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
